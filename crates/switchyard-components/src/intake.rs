@@ -12,7 +12,8 @@ pub use client::{HttpIntakeSink, IntakeSink};
 pub use config::{IntakeQueueFullPolicy, IntakeSinkConfig};
 pub use context::{
     IntakeRequestMetadata, IntakeRequestState, RequestMetadata, INTAKE_APP_HEADER,
-    INTAKE_ENABLED_HEADER, INTAKE_TASK_HEADER, PROXY_SESSION_ID_HEADER,
+    INTAKE_ENABLED_HEADER, INTAKE_EVALUATION_ID_HEADER, INTAKE_TASK_HEADER,
+    INTAKE_TEST_CASE_ID_HEADER, INTAKE_TRACE_ID_HEADER, PROXY_SESSION_ID_HEADER,
 };
 pub use payload::{
     anthropic_response_from_stream, now_millis, openai_chat_response_from_stream,

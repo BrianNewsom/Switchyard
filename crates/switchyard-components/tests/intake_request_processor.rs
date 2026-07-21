@@ -29,6 +29,18 @@ fn request_metadata_extracts_only_explicit_intake_fields_case_insensitively() ->
             "x-switchyard-intake-task".to_string(),
             "developer-session".to_string(),
         ),
+        (
+            "x-switchyard-intake-trace-id".to_string(),
+            "trace-per-request".to_string(),
+        ),
+        (
+            "x-switchyard-intake-evaluation-id".to_string(),
+            "evaluation-123".to_string(),
+        ),
+        (
+            "x-switchyard-intake-test-case-id".to_string(),
+            "case-456".to_string(),
+        ),
         ("authorization".to_string(), "Bearer secret".to_string()),
     ]);
 
@@ -38,6 +50,15 @@ fn request_metadata_extracts_only_explicit_intake_fields_case_insensitively() ->
     assert_eq!(metadata.intake.enabled, Some(true));
     assert_eq!(metadata.intake.app.as_deref(), Some("log2/codex"));
     assert_eq!(metadata.intake.task.as_deref(), Some("developer-session"));
+    assert_eq!(
+        metadata.intake.trace_id.as_deref(),
+        Some("trace-per-request")
+    );
+    assert_eq!(
+        metadata.intake.evaluation_id.as_deref(),
+        Some("evaluation-123")
+    );
+    assert_eq!(metadata.intake.test_case_id.as_deref(), Some("case-456"));
     Ok(())
 }
 

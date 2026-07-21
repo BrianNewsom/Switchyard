@@ -155,6 +155,13 @@ impl IntakePayloadBuilder {
         );
         let mut response_entry = object_from_value(openai_response, "OpenAI intake response")?;
         strip_synthetic_response_id(&mut response_entry);
+        let response_model_missing = response_entry
+            .get("model")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty);
+        if let (true, Some(served_model)) = (response_model_missing, ctx.served_model.as_deref()) {
+            response_entry.insert("model".to_string(), Value::String(served_model.to_string()));
+        }
 
         // Metadata-only unless content capture is explicitly enabled.
         if !self.config.capture_content {
@@ -165,19 +172,23 @@ impl IntakePayloadBuilder {
             .session_id
             .clone()
             .filter(|session_id| !session_id.is_empty());
+        let trace_id = ctx.request_metadata.intake.trace_id.clone();
 
         let mut payload = Map::new();
         payload.insert("request".to_string(), Value::Object(request_entry));
         payload.insert("response".to_string(), Value::Object(response_entry));
         add_cost_fields(&mut payload);
+        if let Some(session_id) = session_id {
+            payload.insert("session_id".to_string(), Value::String(session_id));
+        }
+        if let Some(trace_id) = trace_id {
+            payload.insert("trace_id".to_string(), Value::String(trace_id));
+        }
         if let Some(evaluation_context) = self.evaluation_context(ctx) {
             payload.insert(
                 "evaluation_context".to_string(),
                 Value::Object(evaluation_context),
             );
-        }
-        if let Some(session_id) = session_id {
-            payload.insert("session_id".to_string(), Value::String(session_id));
         }
         payload.insert(
             "provider".to_string(),
@@ -312,24 +323,28 @@ impl IntakePayloadBuilder {
     fn task_name(&self, ctx: &IntakePayloadContext) -> String {
         ctx.request_metadata
             .intake
-            .task
+            .test_case_id
             .clone()
+            .or_else(|| ctx.request_metadata.intake.task.clone())
             .unwrap_or_else(|| "chat".to_string())
     }
 
     /// Builds top-level Intake evaluation context from request labels.
     fn evaluation_context(&self, ctx: &IntakePayloadContext) -> Option<Map<String, Value>> {
-        let evaluation_run_id = ctx
-            .session_id
-            .as_deref()
-            .filter(|s| !s.is_empty())?
-            .to_string();
+        let evaluation_id = ctx.request_metadata.intake.evaluation_id.clone()?;
         let test_case_id = self.task_name(ctx);
         let mut evaluation_context = Map::new();
-        evaluation_context.insert(
-            "evaluation_run_id".to_string(),
-            Value::String(evaluation_run_id),
-        );
+        evaluation_context.insert("evaluation_id".to_string(), Value::String(evaluation_id));
+        if let Some(session_id) = ctx
+            .session_id
+            .as_deref()
+            .filter(|session_id| !session_id.is_empty())
+        {
+            evaluation_context.insert(
+                "evaluation_run_id".to_string(),
+                Value::String(session_id.to_string()),
+            );
+        }
         evaluation_context.insert("test_case_id".to_string(), Value::String(test_case_id));
         Some(evaluation_context)
     }

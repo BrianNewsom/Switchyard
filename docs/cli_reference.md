@@ -116,10 +116,24 @@ derives queryable token fields from `response.usage` and queryable cost fields
 from top-level `cost_usd`, `cost_input_usd`, `cost_output_usd`, and
 `cost_details`. Switchyard emits cost fields only when the served model has a
 known pricing entry; `routing_stats_final.json` remains the run-level source
-for aggregate routing/model cost estimates. When a session ID is present,
-Switchyard also maps the Intake app/task labels into top-level
-`evaluation_context.dataset_*` and `evaluation_context.test_case_id` for span
-queries while keeping the original labels under `request.switchyard`.
+for aggregate routing/model cost estimates. Cost calculation prefers the model
+reported by the provider in `response.model`. When the provider omits that
+field or reports an empty value, Switchyard falls back to the backend-selected
+model.
+
+Clients may attach correlation metadata to each model request:
+
+| Header | Intake payload field |
+|---|---|
+| `proxy_x_session_id` | `session_id` |
+| `x-switchyard-intake-trace-id` | `trace_id` |
+| `x-switchyard-intake-evaluation-id` | `evaluation_context.evaluation_id` |
+| `x-switchyard-intake-test-case-id` | `evaluation_context.test_case_id` |
+
+`session_id` does not imply `evaluation_context.evaluation_id`; Intake requires
+an explicit evaluation ID naming an existing Studio Evaluation.
+
+`x-switchyard-intake-task` is the per-request test-case fallback.
 
 ### RL trace logging
 
@@ -569,7 +583,7 @@ switchyard verify --api-key "$OPENROUTER_API_KEY" --base-url https://openrouter.
 | `SWITCHYARD_NVDATAFLOW_PROJECT` | NVDataflow project name for the alternate intake sink (paired with `--intake-nvdataflow-project`). Precedence: CLI flag first, then this env var. |
 | `SWITCHYARD_WORKERS` | Default uvicorn worker count for `serve`. |
 | `SWITCHYARD_TELEMETRY_OPT_OUT` | Disable the `X-Switchyard-Version` telemetry header on outbound calls. `NEMO_SWITCHYARD_TELEMETRY_OPT_OUT` is honored for backwards compatibility. |
-| `SWITCHYARD_INTAKE_BASE_URL`, `SWITCHYARD_INTAKE_WORKSPACE`, `SWITCHYARD_INTAKE_API_KEY`, `SWITCHYARD_INTAKE_APP`, `SWITCHYARD_INTAKE_TASK`, `SWITCHYARD_SESSION_ID`, `SWITCHYARD_USER_ID` | Intake-sink overrides for CI / headless runs. Precedence: the matching CLI flag (e.g. `--intake-user-id`) first, then the env var, then any persisted / SDK default (e.g. `~/.switchyard/user_id`). |
+| `SWITCHYARD_INTAKE_BASE_URL`, `SWITCHYARD_INTAKE_WORKSPACE`, `SWITCHYARD_INTAKE_API_KEY`, `SWITCHYARD_INTAKE_APP`, `SWITCHYARD_INTAKE_TASK`, `SWITCHYARD_SESSION_ID`, `SWITCHYARD_USER_ID` | Intake-sink overrides for CI / headless runs. Precedence is the matching CLI flag (e.g. `--intake-user-id`) first, then the env var, then any persisted / SDK default (e.g. `~/.switchyard/user_id`). |
 | `NMP_ACCESS_TOKEN` | Fallback bearer token for the intake sink when the NMP SDK config is not present. |
 
 ## See also

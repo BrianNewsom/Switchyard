@@ -16,6 +16,12 @@ pub const INTAKE_ENABLED_HEADER: &str = "x-switchyard-intake-enabled";
 pub const INTAKE_APP_HEADER: &str = "x-switchyard-intake-app";
 /// Header carrying the intake task label.
 pub const INTAKE_TASK_HEADER: &str = "x-switchyard-intake-task";
+/// Header carrying an Intake trace ID for this model request.
+pub const INTAKE_TRACE_ID_HEADER: &str = "x-switchyard-intake-trace-id";
+/// Header carrying the Intake evaluation ID for this model request.
+pub const INTAKE_EVALUATION_ID_HEADER: &str = "x-switchyard-intake-evaluation-id";
+/// Header carrying the Intake test-case ID for this model request.
+pub const INTAKE_TEST_CASE_ID_HEADER: &str = "x-switchyard-intake-test-case-id";
 
 /// Intake-specific metadata extracted from request headers.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -26,6 +32,12 @@ pub struct IntakeRequestMetadata {
     pub app: Option<String>,
     /// Optional task label.
     pub task: Option<String>,
+    /// Optional trace ID used to join this model call to an existing trace.
+    pub trace_id: Option<String>,
+    /// Optional Intake evaluation ID.
+    pub evaluation_id: Option<String>,
+    /// Optional Intake test-case ID.
+    pub test_case_id: Option<String>,
 }
 
 /// Per-request metadata shared across processors.
@@ -50,6 +62,9 @@ impl RequestMetadata {
                 enabled: parse_bool(header_value(&normalized, INTAKE_ENABLED_HEADER).as_deref()),
                 app: header_value(&normalized, INTAKE_APP_HEADER),
                 task: header_value(&normalized, INTAKE_TASK_HEADER),
+                trace_id: header_value(&normalized, INTAKE_TRACE_ID_HEADER),
+                evaluation_id: header_value(&normalized, INTAKE_EVALUATION_ID_HEADER),
+                test_case_id: header_value(&normalized, INTAKE_TEST_CASE_ID_HEADER),
             },
         }
     }

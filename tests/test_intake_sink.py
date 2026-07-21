@@ -262,6 +262,9 @@ class TestRequestMetadata:
             "x-switchyard-intake-enabled": "true",
             "x-switchyard-intake-app": "log2/codex",
             "x-switchyard-intake-task": "developer-session",
+            "x-switchyard-intake-trace-id": "trace-per-request",
+            "x-switchyard-intake-evaluation-id": "evaluation-123",
+            "x-switchyard-intake-test-case-id": "case-456",
             "authorization": "Bearer secret",
         })
 
@@ -269,7 +272,9 @@ class TestRequestMetadata:
         assert metadata.intake.enabled is True
         assert metadata.intake.app == "log2/codex"
         assert metadata.intake.task == "developer-session"
-
+        assert metadata.intake.trace_id == "trace-per-request"
+        assert metadata.intake.evaluation_id == "evaluation-123"
+        assert metadata.intake.test_case_id == "case-456"
 
 class TestIntakePayloadBuilder:
     def test_responses_request_is_normalized_to_openai_shape(self):
@@ -402,7 +407,7 @@ class TestIntakePayloadBuilder:
         })
         ctx = ProxyContext(metadata={
             INTAKE_INBOUND_FORMAT_KEY: request.request_type,
-            "_proxy_actual_model": "gpt-4o",
+            "_proxy_actual_model": "openai/openai/gpt-5.2",
             INTAKE_STARTED_AT_MS_KEY: 1_700_000_000_000,
             INTAKE_ENDED_AT_MS_KEY: 1_700_000_001_840,
             INTAKE_SESSION_ID_KEY: "session-123",
@@ -431,10 +436,7 @@ class TestIntakePayloadBuilder:
         assert payload["cost_details"]["cache_write"] == pytest.approx(0.0)
 
         request_switchyard = payload["request"]["switchyard"]
-        assert payload["evaluation_context"] == {
-            "evaluation_run_id": "session-123",
-            "test_case_id": "developer-session",
-        }
+        assert "evaluation_context" not in payload
         assert "served_model" not in request_switchyard
         assert "started_at_ms" not in request_switchyard
         assert "ended_at_ms" not in request_switchyard
@@ -445,6 +447,86 @@ class TestIntakePayloadBuilder:
 
         assert "switchyard" not in payload["response"]
         _assert_chat_completions_ingest_shape(payload)
+
+    def test_request_scoped_trace_and_evaluation_context(self):
+        builder = IntakePayloadBuilder(
+            IntakeSinkConfig(intake_base_url="http://localhost:8080", workspace="default")
+        )
+        request = ChatRequest.openai_chat({
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        ctx = ProxyContext(metadata={
+            INTAKE_SESSION_ID_KEY: "session-123",
+            CTX_REQUEST_METADATA: RequestMetadata(
+                intake=IntakeRequestMetadata(
+                    trace_id="trace-123",
+                    evaluation_id="evaluation-456",
+                    test_case_id="case-789",
+                    task="task-fallback",
+                ),
+            ),
+        })
+
+        payload = builder.build(
+            ctx=ctx,
+            request_snapshot=request,
+            response=ChatResponse.openai_completion(_completion()),
+            stream=False,
+        )
+
+        assert payload["trace_id"] == "trace-123"
+        assert payload["session_id"] == "session-123"
+        assert payload["evaluation_context"] == {
+            "evaluation_id": "evaluation-456",
+            "evaluation_run_id": "session-123",
+            "test_case_id": "case-789",
+        }
+
+    def test_response_model_takes_precedence_over_backend_selection_for_cost(self):
+        builder = IntakePayloadBuilder(
+            IntakeSinkConfig(intake_base_url="http://localhost:8080", workspace="default")
+        )
+        request = ChatRequest.openai_chat({
+            "model": "routed-model-alias",
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        ctx = ProxyContext()
+        ctx.selected_model = "openai/openai/gpt-5.2"
+
+        payload = builder.build(
+            ctx=ctx,
+            request_snapshot=request,
+            response=ChatResponse.openai_completion(
+                _completion(model="nvidia/nvidia/nemotron-3-super-v3")
+            ),
+            stream=False,
+        )
+
+        assert payload["response"]["model"] == "nvidia/nvidia/nemotron-3-super-v3"
+        assert payload["cost_usd"] == pytest.approx(0.000004)
+
+    def test_backend_selected_model_fills_missing_response_model_for_cost(self):
+        builder = IntakePayloadBuilder(
+            IntakeSinkConfig(intake_base_url="http://localhost:8080", workspace="default")
+        )
+        request = ChatRequest.openai_chat({
+            "model": "routed-model-alias",
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        ctx = ProxyContext()
+        ctx.selected_model = "openai/openai/gpt-5.2"
+        response = _completion(model="")
+
+        payload = builder.build(
+            ctx=ctx,
+            request_snapshot=request,
+            response=ChatResponse.openai_completion(response),
+            stream=False,
+        )
+
+        assert payload["response"]["model"] == "openai/openai/gpt-5.2"
+        assert payload["cost_usd"] == pytest.approx(0.000088)
 
     def test_chat_completions_payload_omits_cost_for_unknown_model(self):
         """Unknown model aliases do not invent chat-completions cost fields."""
@@ -598,6 +680,9 @@ class TestIntakeRequestProcessor:
                 "x-switchyard-intake-enabled": "true",
                 "x-switchyard-intake-app": "codex",
                 "x-switchyard-intake-task": "developer-session",
+                "x-switchyard-intake-trace-id": "trace-123",
+                "x-switchyard-intake-evaluation-id": "evaluation-456",
+                "x-switchyard-intake-test-case-id": "case-789",
             }),
         )
 
@@ -618,6 +703,12 @@ class TestIntakeRequestProcessor:
         assert "app" not in payload["request"]["switchyard"]
         assert "task" not in payload["request"]["switchyard"]
         assert payload["session_id"] == "session-123"
+        assert payload["trace_id"] == "trace-123"
+        assert payload["evaluation_context"] == {
+            "evaluation_id": "evaluation-456",
+            "evaluation_run_id": "session-123",
+            "test_case_id": "case-789",
+        }
 
     async def test_header_opt_out_overrides_store_true_in_rust_context(self):
         request_processor = IntakeRequestProcessor()

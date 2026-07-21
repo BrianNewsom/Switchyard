@@ -10,7 +10,9 @@ use switchyard_components::{
     IntakePayloadBuilder, IntakeRequestMetadata, IntakeRequestState, IntakeSinkConfig,
     RandomRoutingDecision, RandomRoutingTier, RequestMetadata, StatsRouteLabel,
 };
-use switchyard_core::{ChatRequest, ChatRequestType, LlmTargetId, ModelId, ProxyContext, Result};
+use switchyard_core::{
+    ChatRequest, ChatRequestType, ChatResponse, LlmTargetId, ModelId, ProxyContext, Result,
+};
 
 use support::intake::{
     completion, completion_with_usage, openai_chat_request, record_backend_selection,
@@ -87,18 +89,59 @@ fn payload_builder_normalizes_responses_request_and_strips_synthetic_response_id
     assert_eq!(payload["request"]["switchyard"]["stream"], true);
     assert!(payload["request"]["switchyard"].get("app").is_none());
     assert!(payload["request"]["switchyard"].get("task").is_none());
-    assert_eq!(
-        payload["evaluation_context"]["evaluation_run_id"],
-        "session-123"
-    );
-    assert_eq!(
-        payload["evaluation_context"]["test_case_id"],
-        "developer-session"
-    );
+    assert!(payload.get("evaluation_context").is_none());
     assert_eq!(payload["request"]["switchyard"]["latency_ms"], 1840);
     assert!(payload["response"].get("id").is_none());
     assert_eq!(payload["provider"], "switchyard");
     assert!(payload["response"].get("switchyard").is_none());
+    Ok(())
+}
+
+#[test]
+fn payload_uses_request_scoped_trace_and_evaluation_context() -> Result<()> {
+    let builder = IntakePayloadBuilder::new(IntakeSinkConfig::default());
+    let request = openai_chat_request("gpt-4o");
+    let mut ctx = ProxyContext::new();
+    record_backend_selection(&mut ctx, ModelId::from_static("gpt-4o"));
+    ctx.insert(RequestMetadata {
+        session_id: Some("session-123".to_string()),
+        intake: IntakeRequestMetadata {
+            trace_id: Some("trace-123".to_string()),
+            evaluation_id: Some("evaluation-456".to_string()),
+            test_case_id: Some("case-789".to_string()),
+            task: Some("task-fallback".to_string()),
+            ..IntakeRequestMetadata::default()
+        },
+    });
+    ctx.insert(IntakeRequestState {
+        started_at_ms: 1_700_000_000_000,
+        inbound_format: ChatRequestType::OpenAiChat,
+        session_id: Some("session-123".to_string()),
+        skip: false,
+        request_snapshot: Some(request.clone()),
+    });
+    let payload_ctx =
+        switchyard_components::intake::IntakePayloadContext::from_proxy_context(&ctx, None);
+
+    let payload = builder.build(
+        &payload_ctx,
+        &request,
+        &completion("chatcmpl-test", "hello"),
+        false,
+    )?;
+
+    assert_eq!(payload["trace_id"], "trace-123");
+    assert_eq!(payload["session_id"], "session-123");
+    assert_eq!(
+        payload["evaluation_context"]["evaluation_id"],
+        "evaluation-456"
+    );
+    assert_eq!(
+        payload["evaluation_context"]["evaluation_run_id"],
+        "session-123"
+    );
+    assert_eq!(payload["evaluation_context"]["test_case_id"], "case-789");
+    assert!(payload.get("experiment_context").is_none());
     Ok(())
 }
 
@@ -156,6 +199,95 @@ fn payload_carries_response_usage_and_switchyard_timing() -> Result<()> {
     assert_eq!(request_switchyard["inbound_format"], "openai_chat");
     assert_eq!(request_switchyard["version"], expected_switchyard_version());
     assert!(payload["response"].get("switchyard").is_none());
+    Ok(())
+}
+
+#[test]
+fn payload_preserves_response_model_for_tool_call_logging_and_cost() -> Result<()> {
+    let builder = IntakePayloadBuilder::new(IntakeSinkConfig {
+        capture_content: true,
+        ..IntakeSinkConfig::default()
+    });
+    let request = openai_chat_request("routed-model-alias");
+    let mut ctx = ProxyContext::new();
+    record_backend_selection(&mut ctx, ModelId::from_static("openai/openai/gpt-5.2"));
+    ctx.insert(IntakeRequestState {
+        started_at_ms: 1_700_000_000_000,
+        inbound_format: ChatRequestType::OpenAiChat,
+        session_id: None,
+        skip: false,
+        request_snapshot: Some(request.clone()),
+    });
+    let payload_ctx =
+        switchyard_components::intake::IntakePayloadContext::from_proxy_context(&ctx, None);
+    let response = ChatResponse::openai_completion(json!({
+        "id": "chatcmpl-tool-call",
+        "object": "chat.completion",
+        "created": 1_700_000_000,
+        "model": "nvidia/nvidia/nemotron-3-super-v3",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_weather",
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "arguments": "{\"city\":\"Boulder\"}"
+                    }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    }));
+
+    let payload = builder.build(&payload_ctx, &request, &response, false)?;
+
+    assert_eq!(
+        payload["response"]["model"],
+        "nvidia/nvidia/nemotron-3-super-v3"
+    );
+    assert_eq!(
+        payload["response"]["choices"][0]["finish_reason"],
+        "tool_calls"
+    );
+    assert_eq!(
+        payload["response"]["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "get_weather"
+    );
+    assert_eq!(payload["cost_usd"], 0.000004);
+    Ok(())
+}
+
+#[test]
+fn payload_falls_back_to_backend_model_when_response_model_is_missing() -> Result<()> {
+    let builder = IntakePayloadBuilder::new(IntakeSinkConfig::default());
+    let request = openai_chat_request("routed-model-alias");
+    let mut ctx = ProxyContext::new();
+    record_backend_selection(&mut ctx, ModelId::from_static("openai/openai/gpt-5.2"));
+    ctx.insert(IntakeRequestState {
+        started_at_ms: 1_700_000_000_000,
+        inbound_format: ChatRequestType::OpenAiChat,
+        session_id: None,
+        skip: false,
+        request_snapshot: Some(request.clone()),
+    });
+    let payload_ctx =
+        switchyard_components::intake::IntakePayloadContext::from_proxy_context(&ctx, None);
+    let response = ChatResponse::openai_completion(json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "choices": [],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    }));
+
+    let payload = builder.build(&payload_ctx, &request, &response, false)?;
+
+    assert_eq!(payload["response"]["model"], "openai/openai/gpt-5.2");
+    assert_eq!(payload["cost_usd"], 0.000088);
     Ok(())
 }
 

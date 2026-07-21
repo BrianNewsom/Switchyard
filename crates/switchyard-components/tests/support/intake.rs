@@ -145,6 +145,7 @@ pub fn opted_in_context() -> ProxyContext {
             enabled: Some(true),
             app: Some("codex".to_string()),
             task: Some("developer-session".to_string()),
+            ..IntakeRequestMetadata::default()
         },
     });
     ctx.insert(IntakeRequestState {

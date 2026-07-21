@@ -124,12 +124,18 @@ class IntakeRequestMetadata:
     enabled: bool | None
     app: str | None
     task: str | None
+    trace_id: str | None
+    evaluation_id: str | None
+    test_case_id: str | None
 
     def __init__(
         self,
         enabled: bool | None = None,
         app: str | None = None,
         task: str | None = None,
+        trace_id: str | None = None,
+        evaluation_id: str | None = None,
+        test_case_id: str | None = None,
     ) -> None: ...
     def to_dict(self) -> dict[str, Any]: ...
 

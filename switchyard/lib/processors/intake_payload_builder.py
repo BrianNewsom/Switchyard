@@ -14,7 +14,7 @@ from switchyard.lib.config.intake_sink_config import (
     IntakeSinkConfig,
 )
 from switchyard.lib.cost_estimator import estimate_model_cost
-from switchyard.lib.proxy_context import ProxyContext
+from switchyard.lib.proxy_context import CTX_PROXY_ACTUAL_MODEL, ProxyContext
 from switchyard.lib.request_metadata import (
     CTX_REQUEST_METADATA,
     RequestMetadata,
@@ -76,6 +76,13 @@ class IntakePayloadBuilder:
                 f"{type(request_snapshot).__name__}",
             )
         openai_response = self._build_openai_response_dict(response)
+        served_model = ctx.selected_model
+        if not served_model:
+            metadata_model = ctx.metadata.get(CTX_PROXY_ACTUAL_MODEL)
+            served_model = metadata_model if isinstance(metadata_model, str) else None
+        response_model = openai_response.get("model")
+        if served_model and (not isinstance(response_model, str) or not response_model):
+            openai_response["model"] = served_model
         session_id_raw = ctx.metadata.get(INTAKE_SESSION_ID_KEY)
         session_id = session_id_raw if isinstance(session_id_raw, str) and session_id_raw else None
         request_entry = self._build_request_entry(
@@ -97,6 +104,9 @@ class IntakePayloadBuilder:
         evaluation_context = self._evaluation_context(ctx)
         if evaluation_context:
             payload["evaluation_context"] = evaluation_context
+        trace_id = self._trace_id(ctx)
+        if trace_id:
+            payload["trace_id"] = trace_id
         if session_id is not None:
             payload["session_id"] = session_id
         return payload
@@ -158,17 +168,26 @@ class IntakePayloadBuilder:
         return request_entry
 
     def _task_name(self, ctx: ProxyContext) -> str:
-        return _request_metadata(ctx).intake.task or "chat"
+        intake = _request_metadata(ctx).intake
+        return intake.test_case_id or intake.task or "chat"
+
+    def _trace_id(self, ctx: ProxyContext) -> str | None:
+        return _request_metadata(ctx).intake.trace_id
 
     def _evaluation_context(self, ctx: ProxyContext) -> JsonObject | None:
         session_id_raw = ctx.metadata.get(INTAKE_SESSION_ID_KEY)
-        evaluation_run_id = session_id_raw if isinstance(session_id_raw, str) and session_id_raw else None
-        if not evaluation_run_id:
+        session_id = session_id_raw if isinstance(session_id_raw, str) and session_id_raw else None
+        intake = _request_metadata(ctx).intake
+        evaluation_id = intake.evaluation_id
+        if not evaluation_id:
             return None
-        return {
-            "evaluation_run_id": evaluation_run_id,
+        evaluation_context: JsonObject = {
+            "evaluation_id": evaluation_id,
             "test_case_id": self._task_name(ctx),
         }
+        if session_id:
+            evaluation_context["evaluation_run_id"] = session_id
+        return evaluation_context
 
 
 def _request_metadata(ctx: ProxyContext) -> RequestMetadata:

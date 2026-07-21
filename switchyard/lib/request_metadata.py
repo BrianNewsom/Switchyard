@@ -18,6 +18,9 @@ PROXY_SESSION_ID_HEADER = "proxy_x_session_id"
 INTAKE_ENABLED_HEADER = "x-switchyard-intake-enabled"
 INTAKE_APP_HEADER = "x-switchyard-intake-app"
 INTAKE_TASK_HEADER = "x-switchyard-intake-task"
+INTAKE_TRACE_ID_HEADER = "x-switchyard-intake-trace-id"
+INTAKE_EVALUATION_ID_HEADER = "x-switchyard-intake-evaluation-id"
+INTAKE_TEST_CASE_ID_HEADER = "x-switchyard-intake-test-case-id"
 
 # Sentinel values our own launchers send as the ``Authorization`` /
 # ``OPENAI_API_KEY`` value so coding agents satisfy their "no key set"
@@ -116,7 +119,10 @@ __all__ = [
     "CTX_PROFILE_REQUEST_HEADERS",
     "INTAKE_APP_HEADER",
     "INTAKE_ENABLED_HEADER",
+    "INTAKE_EVALUATION_ID_HEADER",
     "INTAKE_TASK_HEADER",
+    "INTAKE_TEST_CASE_ID_HEADER",
+    "INTAKE_TRACE_ID_HEADER",
     "PROXY_SESSION_ID_HEADER",
     "IntakeRequestMetadata",
     "RequestMetadata",

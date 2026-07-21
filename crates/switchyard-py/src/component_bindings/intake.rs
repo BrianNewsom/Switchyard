@@ -34,10 +34,31 @@ impl PyIntakeRequestMetadata {
 #[pymethods]
 impl PyIntakeRequestMetadata {
     #[new]
-    #[pyo3(signature = (enabled=None, app=None, task=None))]
-    fn py_new(enabled: Option<bool>, app: Option<String>, task: Option<String>) -> Self {
+    #[pyo3(signature = (
+        enabled=None,
+        app=None,
+        task=None,
+        trace_id=None,
+        evaluation_id=None,
+        test_case_id=None,
+    ))]
+    fn py_new(
+        enabled: Option<bool>,
+        app: Option<String>,
+        task: Option<String>,
+        trace_id: Option<String>,
+        evaluation_id: Option<String>,
+        test_case_id: Option<String>,
+    ) -> Self {
         Self {
-            inner: IntakeRequestMetadata { enabled, app, task },
+            inner: IntakeRequestMetadata {
+                enabled,
+                app,
+                task,
+                trace_id,
+                evaluation_id,
+                test_case_id,
+            },
         }
     }
 
@@ -54,6 +75,21 @@ impl PyIntakeRequestMetadata {
     #[getter]
     fn task(&self) -> Option<String> {
         self.inner.task.clone()
+    }
+
+    #[getter]
+    fn trace_id(&self) -> Option<String> {
+        self.inner.trace_id.clone()
+    }
+
+    #[getter]
+    fn evaluation_id(&self) -> Option<String> {
+        self.inner.evaluation_id.clone()
+    }
+
+    #[getter]
+    fn test_case_id(&self) -> Option<String> {
+        self.inner.test_case_id.clone()
     }
 
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -85,8 +121,13 @@ impl PyIntakeRequestMetadata {
 
     fn __repr__(&self) -> String {
         format!(
-            "IntakeRequestMetadata(enabled={:?}, app={:?}, task={:?})",
-            self.inner.enabled, self.inner.app, self.inner.task,
+            "IntakeRequestMetadata(enabled={:?}, app={:?}, task={:?}, trace_id={:?}, evaluation_id={:?}, test_case_id={:?})",
+            self.inner.enabled,
+            self.inner.app,
+            self.inner.task,
+            self.inner.trace_id,
+            self.inner.evaluation_id,
+            self.inner.test_case_id,
         )
     }
 }
